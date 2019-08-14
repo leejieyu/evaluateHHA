@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import os
 import math
 import numpy as np
 import random
@@ -34,7 +35,8 @@ def updateContollerPara(variables):
                     # non-local request arrive rate
                     # print('test2',g_1m[i][k],i,k,m)
                     if g_1m[i, k] != 0:
-                        if dm[i][j] >= (m + 1):
+                        if dm[i][j] > (m+1):
+                        # if dm[i][j] >= (m + 1):
                             # print(i,j,m)
                             # try:
                             #    nlArrRateTmp += variables[i][j][m]*ProbOfFlowDist[i][j]*iniRate[i]
@@ -42,19 +44,23 @@ def updateContollerPara(variables):
                             #    print(variables[i][j][m],ProbOfFlowDist[i][j],iniRate[i])
                             # else:
                             #    print('normal')
-                            nlArrRateTmp += variables[i][j][m] * ProbOfFlowDist[i][j] * iniRate[i]
+                            nlArrRateTmp += variables[i][j][m] * ProbOfFlowDist[i][j] * RatePerDomain[i]
 
                     # print(nlArrRateTmp)
 
                     # local request arrive rate
-                    tmp = 0
-                    for p in range(dm[i][j]):
-                        tmp += variables[i][j][p]
-                    tmp = 1 - tmp
-                    lArrRateTmp += tmp * ProbOfFlowDist[i][j] * iniRate[i]
+                    # tmp = 0
+                    # for p in range(dm[i][j]):# 这个求和结果必然=1啊。。。。
+                    #     tmp += variables[i][j][p]
+                    # tmp = 1 - tmp
+                    # lArrRateTmp += tmp * ProbOfFlowDist[i][j] * iniRate[i]
+                        if dm[i][j] == (m+1):
+                            lArrRateTmp += variables[i][j][m] * ProbOfFlowDist[i][j] * RatePerDomain[i]
+
             Controllers[m][k]['nlArrRate'] = nlArrRateTmp
             Controllers[m][k]['lArrRate'] = lArrRateTmp
             Controllers[m][k]['nonlocalTime'] = 1 / (Controllers[m][k]['nlSerRate'] - Controllers[m][k]['nlArrRate'])
+            Controllers[m][k]['localTime'] = 1 / (Controllers[m][k]['lSerRate'] - Controllers[m][k]['lArrRate'])
     # print(Controllers)
     # Controllers[m][k]['l']
 
@@ -80,8 +86,12 @@ def caculateAverLatency(variablesCode, MaxValue):
                         g_1m = g_1m * G[n]
                     for x in range(K[m]):
                         if g_1m[i, x] == 1:
-                            tmp1 = Controllers[m][x]['nonlocalTime']
+                            if m == dm[i][j]-1:
+                                tmp1 = Controllers[m][x]['localTime']
+                            else:
+                                tmp1 = Controllers[m][x]['nonlocalTime']
                             if tmp1 <= 0:
+                                print('the break down controller:',m,",",x,",",Controllers[m][x]['nlArrRate'],",",Controllers[m][x]['lArrRate'])
                                 return MaxValue - 0.1
 
                     tmp2 = 0  # the popagation time between layers
@@ -210,15 +220,34 @@ def Iteration(Pk, Fitness, N, LenthChromo, pc, pm):
     # crossover
     for k in range(N2 - 1):
         if random.random() < pc:
-            cpoint = random.randint(0, LenthChromo)
-            tmp1 = []
-            tmp2 = []
-            tmp1.extend(Mk2[k][0:cpoint])
-            tmp1.extend(Mk2[k + 1][cpoint:LenthChromo])
-            tmp2.extend(Mk2[k + 1][0:cpoint])
-            tmp2.extend(Mk2[k][cpoint:LenthChromo])
+
+            while True:
+                tmp1 = []
+                tmp2 = []
+                cpoint = random.randint(0, LenthChromo)
+                # cpoint = 10
+                # print(cpoint)
+                tmp1.extend(Mk2[k][0:cpoint])
+                tmp1.extend(Mk2[k + 1][cpoint:LenthChromo])
+                tmp2.extend(Mk2[k + 1][0:cpoint])
+                tmp2.extend(Mk2[k][cpoint:LenthChromo])
+                # print("交换前1:",k,",",decode(Mk2[k],dm))
+                # print("交换前2:",k+1,",",decode(Mk2[k + 1],dm))
+                # print("交换后1:",decode(tmp1,dm))
+                # print("交换后2:",decode(tmp2,dm))
+                if check(decode(tmp1,dm)) == True:
+                    # print("test1")
+                    break
+                # print("test2")
+
             Mk2[k] = tmp1[:]
             Mk2[k + 1] = tmp2[:]
+            if (check(decode(Mk2[k],dm)) == False) or (check(decode(Mk2[k+1],dm))==False):
+                print(cpoint)
+                print(decode(Mk2[k],dm))
+                print(decode(Mk2[k+1], dm))
+                print("!!!!!!ERROR in crossover after!!!!!!!!!!!!!!!")
+                os._exit(0)
 
     # mutation
     for k in range(N2):
@@ -249,6 +278,9 @@ def Iteration(Pk, Fitness, N, LenthChromo, pc, pm):
 
             # print(mktmp)
             Mk2[k] = copy.deepcopy(encode(mktmp))
+            if check(decode(Mk2[k],dm)) == False:
+                print("!!!!!!ERROR in mutation!!!!!!!!!!!!!!!")
+                os._exit(0)
             # print('after:',Mk[k])
             # try:
             #     if Mk[k][mpoint] == 1:
@@ -266,6 +298,15 @@ def Iteration(Pk, Fitness, N, LenthChromo, pc, pm):
     # print('Pknext:',Pknext)
 
     return Mk1
+
+def check(construct):
+    for i in range(K[0]):
+        for j in range(K[0]):
+            # print(construct[i][j])
+            if sum(construct[i][j]) != 1:
+                # print(construct[i][j])
+                return False
+    return True
 
 
 def calculateFitness(P, N, MaxValue):
@@ -313,8 +354,8 @@ def plotIterCurv(MaxIteration, result):
 
 def GA(variables, dm):
     # initialization
-    NumberPop = 80
-    MAXITERATION = 80
+    NumberPop = 100
+    MAXITERATION = 100
     pc = 0.75
     pm = 0.4
     # MaxValue = 10000
@@ -385,9 +426,11 @@ def GA(variables, dm):
 
     while True:
         Pk = GetInitialPopulat(NumberPop, variables, dm)
-        insertp = random.randint(0, NumberPop - 2)
+        insertp = random.randint(0, NumberPop - 3)
         Pk[insertp] = encode(COMPARISON)
         Pk[insertp + 1] = encode(COMPARISON2)
+        if retrytimes2 > 0:
+            Pk[insertp + 2] = encode(result[-1][1])
         for k in range(MAXITERATION):
             # 如果没有招到最优解
             Fitness = calculateFitness(Pk, NumberPop, MaxValue)
@@ -402,14 +445,14 @@ def GA(variables, dm):
         retrytimes2 += 1
         print("retrytimes2", retrytimes2)
 
-    return result[-1][0]
+    return result[-1]
 
 
 MaxValue = 1000
 # *******控制层相关初始化*****
 NumOfLayers = 4  #number of layers
 RatioOfLayers = [2,2,2] # the ratio of controllers number between layers
-NumOfL1 = 12 # the contorllers number of L1
+NumOfL1 = 8 # the contorllers number of L1
 LatencyBeLayers = [0.3 for i in range(NumOfLayers)]
 
 #set the number of controllers in each layers
@@ -421,9 +464,11 @@ for i in range(NumOfLayers):
     else:
         tmp = tmp//RatioOfLayers[i-1]
         K.append(tmp)
-print(K)
 
+# K = [12, 4, 2, 1]
+print(K)
 # 多层结构的映射关系 需要变化
+g11 = np.identity(K[0])
 G=[]
 for i in range(NumOfLayers-1):
     rows = K[i]
@@ -440,7 +485,6 @@ print(G)
 
 # K = [12, 4, 2, 1]
 # print(K)
-# g11 = np.identity(K[0])
 # g12 = np.matrix(
 #     [[1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 1, 0],
 #      [0, 0, 1, 0], [0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1]])
@@ -453,8 +497,10 @@ print(G)
 
 
 # 每个控制器的控制域
-alph = 0.6
-domainSizeOflayer1 = np.matrix([1000 for i in range(K[0])])
+TotalHost = 12000
+alph = 0.7
+sizeOflayer1 = TotalHost/NumOfL1
+domainSizeOflayer1 = np.matrix([sizeOflayer1 for i in range(K[0])])
 
 tmp = G[0]
 H = []
@@ -466,29 +512,23 @@ for i in range(NumOfLayers):
         H.append(tmp1)
         if i < NumOfLayers - 1:
             tmp = tmp * G[i]
+print(H)
 # 控制的数据结构初始化
 CAPACITY = 2 ** 31
 Controllers = [list() for i in range(NumOfLayers)]
 for m in range(NumOfLayers):  # initialization
     for k in range(K[m]):
-        lSerRate = CAPACITY / (H[m][0, k] ** 2)
-        nlSerRate = CAPACITY / ((H[m].sum(axis=1)[0, 0]) ** 2)
+        belta =1
+        belta = (H[m][0,0]/H[0][0,0]) ** 1.5
+        # belta =(H[m].sum(axis=1)[0, 0]/H[0].sum(axis=1)[0, 0]) ** 2
+        lSerRate = belta * CAPACITY / (H[m][0, k] ** 2)
+        nlSerRate = belta * CAPACITY / ((H[m].sum(axis=1)[0, 0]) ** 2)
         Controllers[m].append(
             {'localTime': 0, 'nonlocalTime': 0, 'domainSize': H[m][0, k], 'Capacity': CAPACITY, 'lArrRate': 0,
              'lSerRate': lSerRate, 'nlArrRate': 0, 'nlSerRate': nlSerRate})
         # print('This is controller',(m+1),(k+1), Controllers[m][k])
 
-# *****流相关初始化*******
 
-iniRate = [1 for m in range(K[0])]
-# = [10,10,10,10,10,10,10,10,10,10,10,10]
-ProbOfFlowDist = [[0 for m in range(K[0])] for j in range(K[0])]
-# ProbOfFlowDist = setFlowP()
-
-for i in range(K[0]):
-    tmp = 1 / K[0]
-    for j in range(K[0]):
-        ProbOfFlowDist[i][j] = tmp
 # 计算每条流在该架构下的最大决策距离
 dm = [[0 for i in range(K[0])] for i in range(K[0])]
 for i in range(K[0]):
@@ -525,7 +565,16 @@ for i in range(K[0]):
                 COMPARISON2[i][j].append(1)
             else:
                 COMPARISON2[i][j].append(0)
+# print(COMPARISON)
+# print(COMPARISON2)
 
+# test = decode(encode(COMPARISON),dm)
+#
+# if test == COMPARISON:
+#     print("NO")
+# else:
+#     print("YES")
+#
 for i in range(K[0]):
     for j in range(K[0]):
         for k in range(dm[i][j]):
@@ -550,83 +599,171 @@ for i in range(K[0]):
 # GA(variables,dm)
 
 
-NUMBERS = 60
+NUMBERS = 200
 ResultHHA = []
 ResultHA = []
 ResultFA = []
-Resultx = []
-x = 1
+ResultHHAD = []
+
 X = []
 
-numbers = 500
+numbers = 3000
 
 COMPARISONList = GetInitialPopulat(numbers, variables, dm)
 ResultList = [[] for i in range(numbers + 2)]
 
+# *****流相关初始化******
+RatePerHost = 10**-3
+xaxis = RatePerHost / (10**-3) #横坐标的开始
+cluster = TotalHost / NumOfL1
+Ratetmp = cluster * RatePerHost
+RatePerDomain = [Ratetmp for m in range(K[0])]
+# RatePerDomain[7]= 8*Ratetmp
+
+detaRatePerHost = 1 * RatePerHost
+detax = detaRatePerHost / (10**-3) #横坐标的间隔
+deta = cluster * detaRatePerHost
+
+# = [10,10,10,10,10,10,10,10,10,10,10,10]
+ProbOfFlowDist = [[0 for m in range(K[0])] for j in range(K[0])]
+ProbOfFlowDist = setFlowP()
+for i in range(K[0]):
+    tmp = 1 / K[0]
+    for j in range(K[0]):
+
+        ProbOfFlowDist[i][j] = tmp
+#
+# for i in range(NUMBERS):
+#     for k in range(K[0]):
+#         # if k == 7:
+#         #     RatePerDomain[k] += 5*deta
+#         # else:
+#         #     RatePerDomain[k] += deta
+#         RatePerDomain[k] += deta
+#     xaxis += detax
+#     print("the x is",xaxis)
+#     X.append(xaxis)
+#     print("this is HS")
+#     ResultList[0].append(caculateAverLatency(encode(COMPARISON), MaxValue))
+#     print("this is FS")
+#     ResultList[1].append(caculateAverLatency(encode(COMPARISON2), MaxValue))
+#     for k in range(numbers):
+#         ResultList[k + 2].append(caculateAverLatency(COMPARISONList[k], MaxValue))
+#
+# for i in ResultList:
+#     plt.plot(X, i)
+# plt.ylim(0, 2)
+# plt.show()
+#
+# wb = Workbook()
+# ws = wb.active
+# ws.append(X)
+# for i in ResultList:
+#     ws.append(i)
+#     print('write into excel', i)
+# wb.save(r'E:\ljy‘s experiment\data\layersequal3-str.xlsx')
+
+
+
 for i in range(NUMBERS):
-    for k in range(K[0]):
-        iniRate[k] += x
-    X.append(iniRate[0])
-    ResultList[0].append(caculateAverLatency(encode(COMPARISON), MaxValue))
-    ResultList[1].append(caculateAverLatency(encode(COMPARISON2), MaxValue))
-    for k in range(numbers):
-        ResultList[k + 2].append(caculateAverLatency(COMPARISONList[k], MaxValue))
+    # while xaxis<40:
+    #     for k in range(K[0]):
+    #             # if k == 7:
+    #             #     RatePerDomain[k] += 5*deta
+    #                 # else:
+    #             #     RatePerDomain[k] += deta
+    #             RatePerDomain[k] += deta
+    #     xaxis += detax
+    #     print("the x is",xaxis)
+    #     X.append(xaxis)
+    if xaxis >=0:
+        for k in range(K[0]):
+                # if k == 7:
+                #     RatePerDomain[k] += 5*deta
+                    # else:
+                #     RatePerDomain[k] += deta
+                RatePerDomain[k] += deta
+        xaxis += detax
+        print("the x is",xaxis)
+        X.append(xaxis)
+
+    #ProbOfFlowDist = setFlowP()
+    ResultHA.append(caculateAverLatency(encode(COMPARISON),MaxValue))#对比
+#    ResultFlat.append(caculateAverLatency(encode(COMPARISON2)))
+    print(ResultHA)
+    ResultFA.append(caculateAverLatency(encode(COMPARISON2),MaxValue))
+    print(ResultFA)
+    result = GA(variables,dm)
+    ResultHHA.append(result[0])#最优值，调用GA函数
+    ResultHHAD.append(result[1])
+    if check(ResultHHAD[-1]) == False:
+        print("!!!!!!ERROR!!!!!!!!!!!!!!!")
+        os._exit()
+    # if X[-1] >=45 and (ResultHHAD[-1] != COMPARISON):
+    #     print(ResultHHAD[-1])
+    #     detax = detaRatePerHost / (10 ** -3)  # 横坐标的间隔
+    #     deta = cluster * detaRatePerHost
+    #     X1 = []
+    #     Y= []
+    #     Y2=[]
+    #     xaxis = RatePerHost / (10 ** -3)
+    #     RatePerDomain = [Ratetmp for m in range(K[0])]
+    #     for i in range(100):
+    #         for k in range(K[0]):
+    #             # if k == 7:
+    #             #     RatePerDomain[k] += 5*deta
+    #             # else:
+    #             #     RatePerDomain[k] += deta
+    #             RatePerDomain[k] += deta
+    #         xaxis += detax
+    #         # print("the x is", xaxis)
+    #         X1.append(xaxis)
+    #         Y.append(caculateAverLatency(encode(ResultHHAD[-1] ), MaxValue))
+    #         Y2.append(caculateAverLatency(encode(COMPARISON), MaxValue))
+    #     plt.plot(X1, Y)
+    #     plt.plot(X1,Y2)
+    #     plt.ylim(0, 2)
+    #
+    #     plt.show()
+    #     os._exit()
+
+    print(ResultHHA)
+
+# print(ResultHA)
+# print(ResultHHA)
+# X = [i for i in range(NUMBERS)]
+Y = ResultHHA
+print(X)
+Y2= ResultHA
+Y3 = ResultFA
+# Y4 = Resultx
+# fig = plt.figure()
+# ax = fig.add_subplot(111)
+# ax.set(ylabel='Average Latency',xlabel='request rate per domains')
+# ax.plot(X,Y)
+# ax.plot(X,Y2)
+#
 
 wb = Workbook()
-ws = wb.active
-ws.append(X)
-for i in ResultList:
-    ws.append(i)
-    print('write into excel', i)
-wb.save(r'G:\example7.xlsx')
+ws1=wb.active
+ws2=wb.active
+ws1.append(X)
+ws1.append(Y)
+ws1.append(Y2)
+ws1.append(Y3)
+# ws2.append(X)
+# ws2.append(ResultHHAD)
 
-for i in ResultList:
-    plt.plot(X, i)
+wb.save(r'E:\ljy‘s experiment\data\layersequal4.xlsx')
 
+# plt.plot(X,Y)
+plt.plot(X,Y2)
+plt.plot(X,Y3)
+plt.plot(X,Y)
+plt.xlabel("request rate per domains")
+plt.ylabel("Average Latency")
+plt.ylim(0, 2)
 plt.show()
 
-# for i in range(NUMBERS):
-#
-#     for k in range(K[0]):
-#         iniRate[k]+=x
-#     X.append(iniRate[0])
-#     print(iniRate)
-#     #ProbOfFlowDist = setFlowP()
-#     ResultHA.append(caculateAverLatency(encode(COMPARISON),MaxValue))#对比
-# #    ResultFlat.append(caculateAverLatency(encode(COMPARISON2)))
-#     print(ResultHA)
-#     ResultFA.append(caculateAverLatency(encode(COMPARISON2),MaxValue))
-#     print(ResultFA)
-#     ResultHHA.append(GA(variables,dm))#最优值，调用GA函数
-#     print(ResultHHA)
-#
-# # print(ResultHA)
-# # print(ResultHHA)
-# # X = [i for i in range(NUMBERS)]
-# # Y = ResultHHA
-# print(X)
-# Y2= ResultHA
-# Y3 = ResultFA
-# Y4 = Resultx
-# # fig = plt.figure()
-# # ax = fig.add_subplot(111)
-# # ax.set(ylabel='Average Latency',xlabel='request rate per domains')
-# # ax.plot(X,Y)
-# # ax.plot(X,Y2)
-# #
-#
-# # wb = Workbook()
-# # ws=wb.active
-# # ws.append(X)
-# # # ws.append(Y)
-# # ws.append(Y2)
-# # ws.append(Y3)
-# # wb.save(r'G:\example6.xlsx')
-#
-# # plt.plot(X,Y)
-# plt.plot(X,Y2)
-# plt.plot(X,Y3)
-# plt.plot(X,Y4)
-# plt.xlabel("request rate per domains")
-# plt.ylabel("Average Latency")
-# plt.show()
+
+#计算方差
